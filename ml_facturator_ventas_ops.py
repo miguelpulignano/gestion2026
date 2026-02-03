@@ -11,6 +11,13 @@ Cambios principales (además de lo que ya hacía):
   - Crea it_comp del artículo 6711 con costo=amount y precio=0 (es costo-only).
   - Inserta 1 código en codigos para 6711.
 
+- NUEVO (febrero 2026): alta_compra_silenciosa_6756_bonificacion_ml(proveedor_code="034", amount, deposito_codigos="1")
+  - Genera una compra silenciosa del SKU 6756 (Bonificación MercadoLibre) al proveedor FIJO (por defecto 034).
+  - Similar a 6711 pero para la bonificación de envío que ML otorga en el caso de "envío compartido".
+  - Crea it_comp del artículo 6756 con costo=0 y precio=0 (es bonificación, no costo real).
+  - Inserta 1 código en codigos para 6756.
+  - Se usa cuando shipping_cost_seller > nuestro_costo_envio (diferencia = bonificación ML).
+
 - En alta_venta_silenciosa_directa:
   - Si un item trae campo "costo" (>0), ese costo tiene prioridad absoluta sobre resolver_costo_para_sku,
     aunque la venta/precio sea 0. Esto permite SKU 6711 costo-only.
@@ -619,6 +626,84 @@ def alta_compra_silenciosa_6711_mercado_envios(proveedor_code: str = "034",
         except Exception:
             pass
         return {"ok": False, "error": f"Compra silenciosa 6711 (ME) falló: {ex}"}
+
+
+# ---------------- compra silenciosa 6756 (BONIFICACION MERCADO ENVIOS) ----------------
+def alta_compra_silenciosa_6756_bonificacion_ml(proveedor_code: str = "034",
+                                                 amount: float = 0.0,
+                                                 deposito_codigos: str = "1") -> Dict[str, Any]:
+    """
+    Compra silenciosa del SKU 6756 (Bonificación MercadoLibre) al proveedor FIJO (default 034).
+    Similar a 6711 pero para la bonificación de envío que ML otorga.
+    - Usa paramet.compras.
+    - compras.proveedor = proveedor_code zfill(3)
+    - it_comp: articulo=6756, cantidad=1, costo=0, precio=0
+    - Crea 1 código en codigos para 6756.
+    - La diferencia con 6711 es que el COSTO es 0 (es una bonificación, no un costo real).
+    """
+    try:
+        prov_code_str = str(int(str(proveedor_code).strip())).zfill(3)
+    except Exception:
+        prov_code_str = "000"
+
+    try:
+        con = _ensure_db()
+    except Exception as ex:
+        return {"ok": False, "error": f"No se pudo abrir DB: {ex}"}
+    cur = con.cursor()
+
+    if not (_has_table(cur, "compras") and _has_table(cur, "it_comp") and _has_table(cur, "codigos") and _has_table(cur, "paramet")):
+        try:
+            con.close()
+        except Exception:
+            pass
+        return {"ok": False, "error": "Faltan tablas 'compras'/'it_comp'/'codigos'/'paramet'."}
+
+    try:
+        next_nc = _reservar_remito_compra(con)
+
+        fecha_solo = dt.datetime.now().strftime("%Y-%m-%d")
+        hora_solo = dt.datetime.now().strftime("%H:%M:%S")
+
+        cols_c = _table_cols(cur, "compras")
+        col_num = _pick(cols_c, ["compra", "nro", "numero", "id", "mr", "remito"])
+        col_pro = _pick(cols_c, ["proveedor", "prov", "vendor", "cod_prov", "codigo_proveedor"])
+        col_tot = _pick(cols_c, ["total", "tot", "importe"])
+        col_fec = _pick(cols_c, ["fecha", "fech", "fch", "dia"])
+        cur.execute(
+            f'INSERT INTO compras ("{col_num}","{col_pro}","{col_tot}","{col_fec}") VALUES (?,?,?,?)',
+            (int(next_nc), str(prov_code_str), 0.0, fecha_solo)
+        )
+
+        cols_ic = _table_cols(cur, "it_comp")
+        rem_c = _pick(cols_ic, ["remito", "mr", "nroremito", "id_remito"])
+        art_c = _pick(cols_ic, ["articulo", "codigo", "sku", "cod_art"])
+        cant_c = _pick(cols_ic, ["cant", "cantidad"])
+        costo_c = _pick(cols_ic, ["costo", "cost", "precio_costo", "pcosto"])
+        precio_c = _pick(cols_ic, ["precio", "precio_unit", "punit", "importe"])
+        cur.execute(
+            f'INSERT INTO it_comp ("{rem_c}","{art_c}","{cant_c}","{costo_c}","{precio_c}") VALUES (?,?,?,?,?)',
+            (int(next_nc), _norm_sku("6756"), 1, 0.0, 0.0)
+        )
+
+        codigo_6756 = _insert_codigo_for_compra(cur, next_nc, deposito_codigos, _norm_sku("6756"), fecha_solo, hora_solo, "AUTO-6756-BONIF-ML")
+
+        con.commit()
+        try:
+            con.close()
+        except Exception:
+            pass
+        return {"ok": True, "compra": int(next_nc), "proveedor": str(prov_code_str), "codigo_envio": codigo_6756}
+    except Exception as ex:
+        try:
+            con.rollback()
+        except Exception:
+            pass
+        try:
+            con.close()
+        except Exception:
+            pass
+        return {"ok": False, "error": f"Compra silenciosa 6756 (BONIF ML) falló: {ex}"}
 
 
 # ---------------- helpers de reserva exacta para 6696 ----------------

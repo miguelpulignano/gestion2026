@@ -48,6 +48,15 @@ IMPORTANTE (corrección solicitada por el usuario):
 - Para MERCADO ENVIOS, el costo de envío vendedor (env_vend) NO debe tomar shipment.base_cost si en shipment.shipping_option.list_cost
   existe un valor > 0. Debe preferirse list_cost. Esto corrige casos donde base_cost aparece duplicado o inconsistente.
 
+NUEVO (febrero 2026 - SKU 6756 ENVÍO COMPARTIDO):
+- Para MERCADO ENVIOS con "envío compartido" (parte a cargo nuestro y parte bonificada por ML):
+  * SKU 6711: Representa "nuestro costo de envío" (lo que pagamos al proveedor 034).
+  * SKU 6756: Representa la "bonificación de MercadoLibre" (diferencia entre shipping_cost_seller y nuestro_costo_envio).
+  * Cuando shipping_cost_seller > nuestro_costo_envio, se crea automáticamente:
+    - Compra silenciosa de SKU 6756 (proveedor 034, costo=0)
+    - Item en factura: "Envio Bonificacion de MercadoLibre", precio = bonificacion_ml, costo = 0
+  * Esto permite facturar correctamente casos donde ML subsidia parte del envío.
+
 
 
 
@@ -366,7 +375,7 @@ def _group_has_envio_item(orders_group: List[Dict[str, Any]]) -> bool:
         def _norm(s: Any) -> str:
             return str(s or "").strip().upper()
 
-    env_skus = {_norm_sku("6696"), _norm_sku("6711"), _norm_sku("0888")}
+    env_skus = {_norm_sku("6696"), _norm_sku("6711"), _norm_sku("6756"), _norm_sku("0888")}
 
     for o in (orders_group or []):
         items = o.get("productos") or o.get("line_items") or []
@@ -1385,7 +1394,7 @@ class DataHandlersFacturarMixin:
                     env_cli_total, env_vend_total = 0.0, 0.0
                 try:
                     has_envio_line = any(
-                        (_norm_sku((_it or {}).get('sku')) in (_norm_sku('6711'), _norm_sku('6696')))
+                        (_norm_sku((_it or {}).get('sku')) in (_norm_sku('6711'), _norm_sku('6696'), _norm_sku('6756')))
                         or ('ENVIO' in str((_it or {}).get('nombre') or '').upper())
                         for _it in (combined_items or [])
                     )
@@ -1397,22 +1406,22 @@ class DataHandlersFacturarMixin:
                     me_precio_6711 = 0.0
                     try:
                         me_sum_sin_envio = float(sum((it.get('subtotal') or 0.0) for it in (combined_items or [])
-                                                     if _norm_sku(it.get('sku')) not in (_norm_sku('6696'), _norm_sku('6711'))))
+                                                     if _norm_sku(it.get('sku')) not in (_norm_sku('6696'), _norm_sku('6711'), _norm_sku('6756'))))
                     except Exception:
                         me_sum_sin_envio = 0.0
 
             if bool(is_me_group) and _nc > 0.0:
                 me_sum_sin_envio = float(sum((it.get("subtotal") or 0.0) for it in combined_items
-                                             if _norm_sku(it.get("sku")) not in (_norm_sku("6696"), _norm_sku("6711"))))
+                                             if _norm_sku(it.get("sku")) not in (_norm_sku("6696"), _norm_sku("6711"), _norm_sku("6756"))))
                 if me_sum_sin_envio < 33000.0 and abs(me_sum_sin_envio - float(_neto_ref or 0.0)) <= 0.50:
                     me_remove_6711 = True
                 me_precio_6711 = float(_nc) if (me_sum_sin_envio < 33000.0) else 0.0
 
-                # Quitar 6696/6711 existentes del detalle (para evitar doble conteo)
+                # Quitar 6696/6711/6756 existentes del detalle (para evitar doble conteo)
                 _filtered = []
                 for _it in (combined_items or []):
                     _sku = _norm_sku(_it.get("sku"))
-                    if _sku in (_norm_sku("6696"), _norm_sku("6711")):
+                    if _sku in (_norm_sku("6696"), _norm_sku("6711"), _norm_sku("6756")):
                         continue
                     _filtered.append(_it)
                 combined_items = _filtered
@@ -1428,10 +1437,38 @@ class DataHandlersFacturarMixin:
                         "nuestro_costo_envio": float(_nc),
                     })
 
+                # NUEVO: SKU 6756 para bonificación de MercadoLibre (envío compartido)
+                # Detectar si hay bonificación: shipping_cost_seller > nuestro_costo_envio
+                me_bonificacion_ml = 0.0
+                me_add_6756 = False
+                try:
+                    env_vend_total = sum(float((o or {}).get('shipping_cost_seller') or 0.0)
+                                        for o in (orders_group or []) if isinstance(o, dict))
+                    if env_vend_total > 0.0 and _nc > 0.0:
+                        me_bonificacion_ml = float(env_vend_total - _nc)
+                        if me_bonificacion_ml > 0.01:  # Tolerancia para evitar errores de redondeo
+                            me_add_6756 = True
+                except Exception:
+                    me_bonificacion_ml = 0.0
+                    me_add_6756 = False
+
+                # Si hay bonificación, agregar SKU 6756
+                if me_add_6756:
+                    combined_items.append({
+                        "sku": _norm_sku("6756"),
+                        "nombre": "Envio Bonificacion de MercadoLibre",
+                        "cantidad": 1,
+                        "precio": float(me_bonificacion_ml),
+                        "subtotal": float(me_bonificacion_ml),
+                        "nuestro_costo_envio": 0.0,
+                    })
+
             # Guardar flags ME para el proceso de GENERAR (precompra/venta)
             frm._wf_me_remove_6711 = bool(me_remove_6711)
             frm._wf_me_precio_6711 = float(me_precio_6711 or 0.0)
             frm._wf_me_sum_sin_envio = float(me_sum_sin_envio or 0.0)
+            frm._wf_me_bonificacion_ml = float(me_bonificacion_ml or 0.0)
+            frm._wf_me_add_6756 = bool(me_add_6756)
             # Para compatibilidad: considerar "hay envio" sólo si 6711 quedó en detalle
             frm._has_envio_item = bool(is_me_group) and (not bool(me_remove_6711))
 
@@ -1484,6 +1521,7 @@ class DataHandlersFacturarMixin:
             stock_map = owner._stock_map_for_skus(skus)
             stock_map[_norm_sku("6696")] = max(1, int(stock_map.get(_norm_sku("6696")) or 0))
             stock_map[_norm_sku("6711")] = max(1, int(stock_map.get(_norm_sku("6711")) or 0))
+            stock_map[_norm_sku("6756")] = max(1, int(stock_map.get(_norm_sku("6756")) or 0))
 
             # ----------------- Validaciones de stock/SKU -----------------
             is_ok_tab = True
@@ -1501,7 +1539,7 @@ class DataHandlersFacturarMixin:
                 sku_norm = _norm_sku(sku_it)
 
                 # No validar stock para líneas de envío
-                if sku_norm in (_norm_sku("6696"), _norm_sku("6711")):
+                if sku_norm in (_norm_sku("6696"), _norm_sku("6711"), _norm_sku("6756")):
                     continue
 
                 try:
@@ -1574,7 +1612,7 @@ class DataHandlersFacturarMixin:
                 stock_display = str(stock_val)
 
                 tags = ()
-                if sku_norm and sku_norm not in (_norm_sku("6696"), _norm_sku("6711")) and stock_val < qty_req:
+                if sku_norm and sku_norm not in (_norm_sku("6696"), _norm_sku("6711"), _norm_sku("6756")) and stock_val < qty_req:
                     tags = ("stock_faltante",)
 
                 tv_items.insert(
@@ -2082,6 +2120,52 @@ class DataHandlersFacturarMixin:
                             tabs_state[frm_i] = False
                             continue
 
+                    # NUEVO: Para MERCADO ENVIOS con bonificación ML (envío compartido),
+                    # realizar PRE-COMPRA de 6756 (proveedor 034) antes de generar la venta.
+                    compra_nc_envio_6756 = None
+                    codigo_envio_creado_6756 = None
+                    me_add_6756 = bool(getattr(frm_i, "_wf_me_add_6756", False))
+                    me_bonificacion_ml = float(getattr(frm_i, "_wf_me_bonificacion_ml", 0.0) or 0.0)
+                    if is_me_tab and me_add_6756 and me_bonificacion_ml > 0.0:
+                        try:
+                            if hasattr(ventas_ops, "alta_compra_silenciosa_6756_bonificacion_ml"):
+                                res_comp_6756 = ventas_ops.alta_compra_silenciosa_6756_bonificacion_ml("034", float(me_bonificacion_ml), deposito_codigos="1")
+                            elif hasattr(ventas_ops, "alta_compra_silenciosa_sku"):
+                                # Firma genérica esperada: (sku, proveedor, costo, deposito_codigos=...)
+                                # Para 6756, costo=0 pero amount es el precio de venta
+                                res_comp_6756 = ventas_ops.alta_compra_silenciosa_sku("6756", "034", 0.0, deposito_codigos="1")
+                            elif hasattr(ventas_ops, "alta_compra_silenciosa"):
+                                # Firma genérica esperada: (sku, proveedor, costo, deposito_codigos=...)
+                                res_comp_6756 = ventas_ops.alta_compra_silenciosa("6756", "034", 0.0, deposito_codigos="1")
+                            else:
+                                raise AttributeError("ventas_ops no tiene método de compra silenciosa para SKU 6756")
+                            if res_comp_6756.get("ok"):
+                                compra_nc_envio_6756 = int(res_comp_6756.get("compra"))
+                                codigo_envio_creado_6756 = str(res_comp_6756.get("codigo_envio") or "")
+                                frm_i._compra_nc_envio_6756 = compra_nc_envio_6756
+                                frm_i._codigo_envio_creado_6756 = codigo_envio_creado_6756
+                                resultados.append(f"{base_title_i}: Compra 6756 BONIFICACION ML creada (NC {compra_nc_envio_6756})")
+                            else:
+                                errores_en_proceso = True
+                                resultados.append(f"{base_title_i}: FALLÓ compra 6756 BONIFICACION ML: {res_comp_6756.get('error')}")
+                                detalles_post.append("ERROR: Compra silenciosa 6756 (BONIFICACION ML) falló. Operación cancelada.")
+                                try:
+                                    nb.tab(frm_i, text=f"ERROR — {base_title_i}")
+                                except Exception:
+                                    pass
+                                tabs_state[frm_i] = False
+                                continue
+                        except Exception as ex_pc:
+                            errores_en_proceso = True
+                            resultados.append(f"{base_title_i}: FALLÓ compra 6756 BONIFICACION ML: {ex_pc}")
+                            detalles_post.append("ERROR: Compra silenciosa 6756 (BONIFICACION ML) falló (excepción). Operación cancelada.")
+                            try:
+                                nb.tab(frm_i, text=f"ERROR — {base_title_i}")
+                            except Exception:
+                                pass
+                            tabs_state[frm_i] = False
+                            continue
+
                     if compra_nc_error_flag or proveedor_error_flag:
                         detalles_post.append("ERROR: Numero de compra mal asignado o Codigo de proveedor inválido (NC > 100000 o prov=0). Operación cancelada.")
                         continue
@@ -2301,7 +2385,7 @@ class DataHandlersFacturarMixin:
                         try:
                             if float(me_sum_sin_envio or 0.0) <= 0.0:
                                 me_sum_sin_envio = float(sum((it.get("subtotal") or it.get("total") or 0.0) for it in (combined_items_i or [])
-                                                             if _norm_sku(it.get("sku")) not in (_norm_sku("6696"), _norm_sku("6711"))))
+                                                             if _norm_sku(it.get("sku")) not in (_norm_sku("6696"), _norm_sku("6711"), _norm_sku("6756"))))
                         except Exception:
                             pass
                         try:
@@ -2323,9 +2407,10 @@ class DataHandlersFacturarMixin:
                         frm_i._wf_me_precio_6711 = float(me_precio_6711 or 0.0)
                         frm_i._wf_me_sum_sin_envio = float(me_sum_sin_envio or 0.0)
 
-                        # Filtrar cualquier 6696/6711 preexistente del detalle
+                        # Filtrar cualquier 6696/6711/6756 preexistente del detalle
                         removed_6696 = 0
                         removed_6711 = 0
+                        removed_6756 = 0
                         _new_items = []
                         for _it in (combined_items_i or []):
                             _sku = _norm_sku(_it.get("sku"))
@@ -2340,6 +2425,12 @@ class DataHandlersFacturarMixin:
                                     removed_6711 += int(_it.get("quantity") or 0)
                                 except Exception:
                                     removed_6711 += 0
+                                continue
+                            if _sku == _norm_sku("6756"):
+                                try:
+                                    removed_6756 += int(_it.get("quantity") or 0)
+                                except Exception:
+                                    removed_6756 += 0
                                 continue
                             _new_items.append(_it)
 
@@ -2358,6 +2449,12 @@ class DataHandlersFacturarMixin:
                             except Exception:
                                 pass
                             sku_qty_map.pop(_norm_sku("6711"), None)
+                        if removed_6756:
+                            try:
+                                expected_items_count -= int(removed_6756)
+                            except Exception:
+                                pass
+                            sku_qty_map.pop(_norm_sku("6756"), None)
 
                         # Reinsertar 6711 si corresponde
                         if not bool(me_remove_6711):
@@ -2378,6 +2475,31 @@ class DataHandlersFacturarMixin:
                                 pass
                             try:
                                 sku_qty_map[_norm_sku("6711")] = 1
+                            except Exception:
+                                pass
+
+                        # NUEVO: Reinsertar 6756 si hay bonificación ML (envío compartido)
+                        me_add_6756 = bool(getattr(frm_i, "_wf_me_add_6756", False))
+                        me_bonificacion_ml = float(getattr(frm_i, "_wf_me_bonificacion_ml", 0.0) or 0.0)
+                        if me_add_6756 and me_bonificacion_ml > 0.0:
+                            combined_items_i.append({
+                                "sku": _norm_sku("6756"),
+                                "name": "Envio Bonificacion de MercadoLibre",
+                                "quantity": 1,
+                                "stock": 1,
+                                "nuestro_costo_envio": 0.0,
+                                "costo": 0.0,
+                                "price": float(me_bonificacion_ml),
+                                "precio": float(me_bonificacion_ml),
+                                "subtotal": float(me_bonificacion_ml),
+                                "total": float(me_bonificacion_ml),
+                            })
+                            try:
+                                expected_items_count += 1
+                            except Exception:
+                                pass
+                            try:
+                                sku_qty_map[_norm_sku("6756")] = 1
                             except Exception:
                                 pass
 
