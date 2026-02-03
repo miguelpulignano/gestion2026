@@ -1385,7 +1385,7 @@ class DataHandlersFacturarMixin:
                     env_cli_total, env_vend_total = 0.0, 0.0
                 try:
                     has_envio_line = any(
-                        (_norm_sku((_it or {}).get('sku')) in (_norm_sku('6711'), _norm_sku('6696')))
+                        (_norm_sku((_it or {}).get('sku')) in (_norm_sku('6711'), _norm_sku('6696'), _norm_sku('6756')))
                         or ('ENVIO' in str((_it or {}).get('nombre') or '').upper())
                         for _it in (combined_items or [])
                     )
@@ -1397,13 +1397,13 @@ class DataHandlersFacturarMixin:
                     me_precio_6711 = 0.0
                     try:
                         me_sum_sin_envio = float(sum((it.get('subtotal') or 0.0) for it in (combined_items or [])
-                                                     if _norm_sku(it.get('sku')) not in (_norm_sku('6696'), _norm_sku('6711'))))
+                                                     if _norm_sku(it.get('sku')) not in (_norm_sku('6696'), _norm_sku('6711'), _norm_sku('6756'))))
                     except Exception:
                         me_sum_sin_envio = 0.0
 
             if bool(is_me_group) and _nc > 0.0:
                 me_sum_sin_envio = float(sum((it.get("subtotal") or 0.0) for it in combined_items
-                                             if _norm_sku(it.get("sku")) not in (_norm_sku("6696"), _norm_sku("6711"))))
+                                             if _norm_sku(it.get("sku")) not in (_norm_sku("6696"), _norm_sku("6711"), _norm_sku("6756"))))
                 if me_sum_sin_envio < 33000.0 and abs(me_sum_sin_envio - float(_neto_ref or 0.0)) <= 0.50:
                     me_remove_6711 = True
                 me_precio_6711 = float(_nc) if (me_sum_sin_envio < 33000.0) else 0.0
@@ -2365,7 +2365,7 @@ class DataHandlersFacturarMixin:
                         try:
                             if float(me_sum_sin_envio or 0.0) <= 0.0:
                                 me_sum_sin_envio = float(sum((it.get("subtotal") or it.get("total") or 0.0) for it in (combined_items_i or [])
-                                                             if _norm_sku(it.get("sku")) not in (_norm_sku("6696"), _norm_sku("6711"))))
+                                                             if _norm_sku(it.get("sku")) not in (_norm_sku("6696"), _norm_sku("6711"), _norm_sku("6756"))))
                         except Exception:
                             pass
                         try:
