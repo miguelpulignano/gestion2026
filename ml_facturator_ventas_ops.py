@@ -3,7 +3,7 @@
 Módulo de operaciones de ventas y compras silenciosas para ML Facturador.
 Implementa la lógica de alta de compras y ventas silenciosas para SKUs especiales de envío.
 
-FLUJO DE TRABAJO PARA SKU 6756 (Bonificación MercadoLibre):
+FLUJO DE TRABAJO PARA SKU 6756 (Bonificacion MercadoLibre):
 ===========================================================
 
 1. DETECCIÓN (ml_facturador_ui_data_facturar.py):
@@ -36,7 +36,7 @@ DIFERENCIAS CON OTROS SKUs DE ENVÍO:
 =====================================
 - SKU 6696 (FLEX): Compra con costo = precio = monto envío
 - SKU 6711 (ME normal): Compra con costo = precio = costo envío
-- SKU 6756 (Bonificación ML): Compra con costo = 0, venta con costo >= 0.01
+- SKU 6756 (Bonificacion ML): Compra con costo = 0, venta con costo >= 0.01
 
 Este esquema permite manejar el caso excepcional donde MercadoLibre subsidia
 parcialmente el envío pero el cliente paga una parte.
@@ -143,7 +143,7 @@ def alta_compra_silenciosa_6711_mercado_envios(proveedor_code: str = "034", amou
 
 def alta_compra_silenciosa_6756_bonificacion_ml(proveedor_code: str = "034", amount: float = 0.0, deposito_codigos: str = "1") -> Dict[str, Any]:
     """
-    Crea una compra silenciosa para SKU 6756 (Envío Bonificación de MercadoLibre).
+    Crea una compra silenciosa para SKU 6756 (Envío Bonificacion de MercadoLibre).
     
     Similar a 6711 pero con costo=0 en la compra (el costo real lo paga MercadoLibre).
     El cliente paga 'amount' pero nosotros compramos a costo 0.
@@ -164,7 +164,8 @@ def alta_compra_silenciosa_6756_bonificacion_ml(proveedor_code: str = "034", amo
         codigo_envio = f"ENV-6756-{datetime.now().strftime('%Y%m%d%H%M%S')}"
         
         # TODO: Implementar inserción real en BD
-        # INSERT INTO compras (proveedor=034, total=amount, fecha=hoy)
+        # INSERT INTO compras (proveedor=034, total=0.0, fecha=hoy)
+        #   ^ IMPORTANTE: total=0.0 porque MercadoLibre subsidia el costo completo de la compra
         # INSERT INTO it_comp (articulo=6756, cantidad=1, costo=0.0, precio=0.0)
         #   ^ IMPORTANTE: costo=0 porque MercadoLibre subsidia
         # INSERT INTO codigos (articulo=6756, deposito=deposito_codigos, codigo=codigo_envio)
@@ -191,8 +192,10 @@ def alta_compra_silenciosa_sku(sku: str, proveedor_code: str, amount: float, dep
         compra_nc = 80001
         codigo_envio = f"ENV-{sku}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
         
-        # Para SKU 6756, usar costo 0
-        costo = 0.0 if sku == "6756" else amount
+        # Para SKU 6756, usar costo 0 (compra subsidiada por MercadoLibre)
+        if sku == "6756":
+            # No usar la variable costo aquí ya que es solo para documentación
+            pass
         
         return {
             "ok": True,
@@ -256,7 +259,7 @@ def alta_venta_silenciosa_directa(
         # Para cada item en line_items:
         #   Determinar costo desde BD o compra silenciosa
         #   
-        #   REGLA CRÍTICA PARA SKU 6756 (Bonificación MercadoLibre):
+        #   REGLA CRÍTICA PARA SKU 6756 (Bonificacion MercadoLibre):
         #   ----------------------------------------------------------
         #   La compra silenciosa de 6756 tiene costo=0 (porque ML subsidia),
         #   PERO el confirmador externo (ventas_ops.py) bloquea it_vent con costo<=0.

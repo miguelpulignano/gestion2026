@@ -1435,7 +1435,7 @@ class DataHandlersFacturarMixin:
             # Para compatibilidad: considerar "hay envio" sólo si 6711 quedó en detalle
             frm._has_envio_item = bool(is_me_group) and (not bool(me_remove_6711))
 
-            # NUEVO: MERCADO ENVIOS con Env. Pago > 0 -> agregar SKU 6756 (Bonificación ML)
+            # NUEVO: MERCADO ENVIOS con Env. Pago > 0 -> agregar SKU 6756 (Bonificacion ML)
             # Este es un caso excepcional donde MercadoLibre bonifica parcialmente el envío
             frm._wf_add_6756 = False
             frm._wf_precio_6756 = 0.0
@@ -2106,7 +2106,7 @@ class DataHandlersFacturarMixin:
                             continue
 
                     # NUEVO: Para MERCADO ENVIOS con Env. Pago > 0, realizar PRE-COMPRA de 6756
-                    # (Bonificación de MercadoLibre, proveedor 034, costo=0)
+                    # (Bonificacion de MercadoLibre, proveedor 034, costo=0)
                     compra_nc_envio_6756 = None
                     codigo_envio_creado_6756 = None
                     if is_me_tab:
@@ -2118,17 +2118,21 @@ class DataHandlersFacturarMixin:
                         if env_pago_total > 0.0:
                             try:
                                 # Llamar a la función específica de 6756
-                                res_comp_6756 = ventas_ops.alta_compra_silenciosa_6756_bonificacion_ml("034", float(env_pago_total), deposito_codigos="1")
+                                res_comp_6756 = ventas_ops.alta_compra_silenciosa_6756_bonificacion_ml(
+                                    proveedor_code="034", 
+                                    amount=float(env_pago_total), 
+                                    deposito_codigos="1"
+                                )
                                 if res_comp_6756.get("ok"):
                                     compra_nc_envio_6756 = int(res_comp_6756.get("compra"))
                                     codigo_envio_creado_6756 = str(res_comp_6756.get("codigo_envio") or "")
                                     frm_i._compra_nc_envio_6756 = compra_nc_envio_6756
                                     frm_i._codigo_envio_creado_6756 = codigo_envio_creado_6756
-                                    resultados.append(f"{base_title_i}: Compra 6756 Bonificación ML creada (NC {compra_nc_envio_6756})")
+                                    resultados.append(f"{base_title_i}: Compra 6756 Bonificacion ML creada (NC {compra_nc_envio_6756})")
                                 else:
                                     errores_en_proceso = True
-                                    resultados.append(f"{base_title_i}: FALLÓ compra 6756 Bonificación ML: {res_comp_6756.get('error')}")
-                                    detalles_post.append("ERROR: Compra silenciosa 6756 (Bonificación ML) falló. Operación cancelada.")
+                                    resultados.append(f"{base_title_i}: FALLÓ compra 6756 Bonificacion ML: {res_comp_6756.get('error')}")
+                                    detalles_post.append("ERROR: Compra silenciosa 6756 (Bonificacion ML) falló. Operación cancelada.")
                                     try:
                                         nb.tab(frm_i, text=f"ERROR — {base_title_i}")
                                     except Exception:
@@ -2137,8 +2141,8 @@ class DataHandlersFacturarMixin:
                                     continue
                             except Exception as ex_pc_6756:
                                 errores_en_proceso = True
-                                resultados.append(f"{base_title_i}: FALLÓ compra 6756 Bonificación ML: {ex_pc_6756}")
-                                detalles_post.append("ERROR: Compra silenciosa 6756 (Bonificación ML) falló (excepción). Operación cancelada.")
+                                resultados.append(f"{base_title_i}: FALLÓ compra 6756 Bonificacion ML: {ex_pc_6756}")
+                                detalles_post.append("ERROR: Compra silenciosa 6756 (Bonificacion ML) falló (excepción). Operación cancelada.")
                                 try:
                                     nb.tab(frm_i, text=f"ERROR — {base_title_i}")
                                 except Exception:
