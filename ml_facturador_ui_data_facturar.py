@@ -1380,6 +1380,8 @@ class DataHandlersFacturarMixin:
             me_remove_6711 = False
             me_precio_6711 = 0.0
             me_sum_sin_envio = 0.0
+            me_bonificacion_ml = 0.0
+            me_add_6756 = False
 
             # CASO ESPECIAL: MERCADO ENVIOS SIN ENVIO (Env. Cliente=0 y Env. Vendedor=0) => permitir facturar sin costo
             # (nadie paga envío, y el detalle no debe exigir costo ni insertar 6711)
@@ -1439,8 +1441,6 @@ class DataHandlersFacturarMixin:
 
                 # NUEVO: SKU 6756 para bonificación de MercadoLibre (envío compartido)
                 # Detectar si hay bonificación: shipping_cost_seller > nuestro_costo_envio
-                me_bonificacion_ml = 0.0
-                me_add_6756 = False
                 try:
                     env_vend_total = sum(float((o or {}).get('shipping_cost_seller') or 0.0)
                                         for o in (orders_group or []) if isinstance(o, dict))
