@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox, simpledialog, ttk
 import tkinter.font as tkfont
 
 # Importa el motor de cálculo
@@ -164,7 +164,14 @@ class MileiCalculatorApp(tk.Tk):
         frm_pw.pack(side=tk.TOP, fill=tk.X, padx=20, pady=(0, 8))
 
         cols_pw = ("precio_web_calc", "precio_web_set", "ganancia_web")
-        self.tree_precio_web = ttk.Treeview(frm_pw, columns=cols_pw, show="headings", height=1)
+        self.tree_precio_web = ttk.Treeview(
+            frm_pw,
+            columns=cols_pw,
+            show="headings",
+            height=1,
+            selectmode="none",
+            takefocus=False,
+        )
 
         self.tree_precio_web.heading("precio_web_calc", text="PRECIO WEB CALCULADO")
         self.tree_precio_web.heading("precio_web_set", text="PRECIO WEB SETEAR")
@@ -178,6 +185,15 @@ class MileiCalculatorApp(tk.Tk):
 
         # fila inicial vacía
         self.tree_precio_web.insert("", "end", values=("", "", ""))
+
+        # Evitamos que la fila se "seleccione" al clickear (solo edición manual)
+        bindtags = list(self.tree_precio_web.bindtags())
+        if "Treeview" in bindtags:
+            bindtags.remove("Treeview")
+            self.tree_precio_web.bindtags(tuple(bindtags))
+
+        # Edición manual de "PRECIO WEB SETEAR"
+        self.tree_precio_web.bind("<Double-1>", self._on_precio_web_edit)
 
         notebook = ttk.Notebook(self)
         notebook.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=14, pady=(0, 8))
@@ -694,6 +710,71 @@ class MileiCalculatorApp(tk.Tk):
                 ganancia_str,
             ),
         )
+
+    def _on_precio_web_edit(self, event: tk.Event) -> None:
+        """Permite editar la columna "PRECIO WEB SETEAR" con doble click."""
+        region = self.tree_precio_web.identify_region(event.x, event.y)
+        if region != "cell":
+            return
+
+        col = self.tree_precio_web.identify_column(event.x)
+        if col != "#2":  # Solo permitimos edición en PRECIO WEB SETEAR
+            return
+
+        item_id = self.tree_precio_web.identify_row(event.y)
+        current_val = ""
+        if item_id:
+            current_val = self.tree_precio_web.set(item_id, "precio_web_set")
+
+        # Pedimos el nuevo valor
+        new_val = simpledialog.askstring(
+            "Precio WEB setear",
+            "Ingresá el precio que quieras setear (podés usar punto o coma):",
+            parent=self,
+            initialvalue=current_val,
+        )
+        if new_val is None:
+            return
+
+        def _normalize_price_input(val: str) -> str:
+            """Normaliza permitiendo miles y decimales con punto o coma."""
+            cleaned = val.strip().replace(" ", "")
+
+            # Si viene con ambos, asumimos puntos como miles y coma como decimal
+            if "," in cleaned and "." in cleaned:
+                cleaned = cleaned.replace(".", "")
+                return cleaned.replace(",", ".")
+
+            # Solo puntos: distinguir miles vs decimal
+            if "," not in cleaned and "." in cleaned:
+                parts = cleaned.split(".")
+                if cleaned.count(".") > 1:
+                    cleaned = "".join(parts[:-1]) + "." + parts[-1]
+                elif len(parts[-1]) == 3 and all(len(p) <= 3 for p in parts[:-1]):
+                    cleaned = "".join(parts)
+                    return cleaned
+                return cleaned
+
+            # Solo comas o solo dígitos
+            return cleaned.replace(",", ".")
+
+        new_val = _normalize_price_input(new_val)
+        if not new_val:
+            self._update_precio_web(self._precio_web_calc_val, None)
+            return
+
+        try:
+            precio_set = _parse_float(new_val)
+        except ValueError:
+            messagebox.showerror(
+                "Valor inválido",
+                "Ingresá un número válido para "
+                "\"PRECIO WEB SETEAR\".",
+            )
+            return
+
+        self._update_precio_web(self._precio_web_calc_val, precio_set)
+        return "break"
 
     def _on_descuento_change_sueltos(self) -> None:
         """Aplica el descuento elegido a TODAS las filas tildadas en SEL."""
